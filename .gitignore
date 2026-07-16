@@ -1,0 +1,19 @@
+# Windows / PowerShell
+*.log
+*.tmp
+Thumbs.db
+Desktop.ini
+
+# Local state / backups produced at runtime
+.backups/
+reports/
+*.bak.json
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store

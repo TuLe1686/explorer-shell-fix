@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "description": "Heuristic risk patterns for Windows Explorer shell extensions. Match is case-insensitive on CLSID name, DLL path, or overlay key name.",
+  "vendors": [
+    {
+      "id": "baidu-netdisk",
+      "name": "Baidu Netdisk / 百度网盘",
+      "risk": "high",
+      "patterns": [
+        "BaiduNetdisk",
+        "YunShell",
+        "BaiduYun",
+        "WorkspaceExt",
+        "baidunetdisk"
+      ],
+      "notes": "Icon overlays + context menu often freeze folder views."
+    },
+    {
+      "id": "wps-office",
+      "name": "WPS Office / 金山 WPS",
+      "risk": "high",
+      "patterns": [
+        "Kingsoft",
+        "WPS Office",
+        "qingshellext",
+        "qingnse",
+        "kwpsshellext",
+        "kdesktopshellext",
+        "wpscloud"
+      ],
+      "notes": "Cloud / right-click shell hooks inside explorer.exe."
+    },
+    {
+      "id": "sogou-input",
+      "name": "Sogou Input / 搜狗输入法",
+      "risk": "medium",
+      "patterns": [
+        "SogouInput",
+        "SogouPY",
+        "SogouTSF"
+      ],
+      "notes": "IME modules sometimes load into explorer; lower priority than cloud disks."
+    },
+    {
+      "id": "thunder",
+      "name": "Thunder / 迅雷",
+      "risk": "medium",
+      "patterns": [
+        "Thunder",
+        "Xunlei",
+        "XLShell"
+      ],
+      "notes": "Download manager shell extensions."
+    },
+    {
+      "id": "winrar",
+      "name": "WinRAR",
+      "risk": "low",
+      "patterns": [
+        "WinRAR",
+        "RarExt"
+      ],
+      "notes": "Usually stable; listed for completeness."
+    },
+    {
+      "id": "360",
+      "name": "360 Security / 360",
+      "risk": "high",
+      "patterns": [
+        "\\360\\",
+        "360Safe",
+        "360sd",
+        "QHSafe"
+      ],
+      "notes": "Heavy shell injection on some installs."
+    },
+    {
+      "id": "tencent",
+      "name": "Tencent / 腾讯相关",
+      "risk": "medium",
+      "patterns": [
+        "Tencent",
+        "QQPCMgr",
+        "WeChat"
+      ],
+      "notes": "Varies by product; pattern match only."
+    }
+  ]
+}
