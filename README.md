@@ -45,9 +45,10 @@ cd path\to\explorer-shell-fix
 GUI 按钮：
 
 1. **Diagnose / 诊断** — 看 explorer 进程、图标覆盖、匹配到的厂商 CLSID  
-2. 选择厂商 → **Disable + Restart** — 禁用并重启资源管理器  
-3. **Restore last** — 从备份恢复  
-4. **Export JSON** — 导出诊断报告
+2. 选择厂商 → **Disable vendor** — 禁用并重启资源管理器  
+3. **Disable ALL HIGH** — 一键禁用目录中所有 `risk=high` 厂商  
+4. **Restore last** — 从备份恢复  
+5. **Export JSON** — 导出诊断报告
 
 CLI：
 
@@ -55,11 +56,13 @@ CLI：
 .\Start-ExplorerShellFix.ps1 -Cli diagnose
 .\Start-ExplorerShellFix.ps1 -Cli list-vendors
 .\Start-ExplorerShellFix.ps1 -Cli disable -VendorId baidu-netdisk -RestartExplorer
+.\Start-ExplorerShellFix.ps1 -Cli disable-high -RestartExplorer
 .\Start-ExplorerShellFix.ps1 -Cli restore -BackupPath .\.backups\xxx.json -RestartExplorer
 .\Start-ExplorerShellFix.ps1 -Cli restart-explorer
 .\Start-ExplorerShellFix.ps1 -Cli export
 ```
 
+误匹配过滤：只把 **第三方 Inproc DLL** 算作可禁用扩展；`shdocvw.dll` / `shell32.dll` 等系统宿主不会因注册表旁路路径被标成百度/WPS。
 ### 原理（简图）
 
 ```text
@@ -109,8 +112,15 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 .\Start-ExplorerShellFix.ps1
 ```
 
-CLI examples: see Chinese section above (`-Cli diagnose|disable|restore|...`).
+CLI examples:
 
+```powershell
+.\Start-ExplorerShellFix.ps1 -Cli diagnose
+.\Start-ExplorerShellFix.ps1 -Cli disable-high -RestartExplorer
+.\Start-ExplorerShellFix.ps1 -Cli disable -VendorId baidu-netdisk -RestartExplorer
+```
+
+System Inproc DLLs (`shdocvw.dll`, `shell32.dll`, …) are filtered so namespace folders are not mistaken for third-party shell extensions.
 ### Safety
 
 Registry changes can break shell integrations. Backups are written under `.backups\`. MIT license, no warranty.

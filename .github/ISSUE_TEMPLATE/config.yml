@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: ShellExView (NirSoft)
+    url: https://www.nirsoft.net/utils/shexview.html
+    about: Classic GUI to inspect/disable shell extensions (inspiration for Blocked list).

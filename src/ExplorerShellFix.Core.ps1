@@ -69,6 +69,44 @@ function Get-EsfClsidName {
   $null
 }
 
+function Test-EsfIsSystemShellDll {
+  <#
+    True for Windows built-in shell DLLs (namespace hosts, etc.).
+    These must not be attributed to third-party vendors when a vendor path
+    appears only in adjacent registry values (e.g. Baidu folder namespace → shdocvw.dll).
+  #>
+  param([string]$DllPath)
+  if ([string]::IsNullOrWhiteSpace($DllPath)) { return $true }
+
+  $expanded = [Environment]::ExpandEnvironmentVariables($DllPath).Trim('"')
+  $leaf = [IO.Path]::GetFileName($expanded)
+
+  $systemLeaves = @(
+    'shell32.dll', 'shdocvw.dll', 'windows.storage.dll', 'explorerframe.dll',
+    'twinui.dll', 'twinui.pcshell.dll', 'actxprxy.dll', 'ole32.dll',
+    'combase.dll', 'propsys.dll', 'ntshrui.dll', 'cscui.dll', 'ehstorshell.dll',
+    'thumbcache.dll', 'zipfldr.dll', 'msxml3.dll', 'msxml6.dll'
+  )
+  foreach ($s in $systemLeaves) {
+    if ($leaf -and ($leaf -ieq $s)) { return $true }
+  }
+
+  # Any Inproc under Windows system locations is treated as system-owned for vendor matching.
+  if ($expanded -match '(?i)([:\\]|%)(Windows|WINDIR)(\\System32|\\SysWOW64|\\WinSxS|\\SystemApps|\\ShellComponents|\\ShellExperiences)\\') {
+    return $true
+  }
+  if ($expanded -match '(?i)^%SystemRoot%\\') { return $true }
+  if ($expanded -match '(?i)^C:\\Windows\\') { return $true }
+
+  $false
+}
+
+function Test-EsfIsActionableShellDll {
+  param([string]$DllPath)
+  if ([string]::IsNullOrWhiteSpace($DllPath)) { return $false }
+  -not (Test-EsfIsSystemShellDll -DllPath $DllPath)
+}
+
 function Resolve-EsfVendor {
   param(
     [Parameter(Mandatory)]$Catalog,
@@ -146,11 +184,12 @@ function Get-EsfKnownShellClsids {
         if ($map.ContainsKey($clsid)) { continue }
         $dll = Get-EsfClsidDll -Clsid $clsid
         $name = Get-EsfClsidName -Clsid $clsid
-        $blob = "$name|$clsid|$dll|$pat"
+        # Skip system hosts / empty Inproc (namespace folders that only store a vendor path nearby)
+        if (-not (Test-EsfIsActionableShellDll -DllPath $dll)) { continue }
+        # Vendor must match the DLL path or COM class name — not unrelated registry values
+        $blob = "$name|$dll"
         $vendor = Resolve-EsfVendor -Catalog $Catalog -Text $blob
         if (-not $vendor) { continue }
-        # Skip pure namespace folders (exe launchers) without Inproc shell dll when risk is only path icon
-        if (-not $dll) { continue }
         $map[$clsid] = [pscustomobject]@{
           Kind       = 'ShellClsid'
           Name       = $name
@@ -164,7 +203,12 @@ function Get-EsfKnownShellClsids {
     }
   }
 
-  $map.Values | Sort-Object Risk, VendorId, Name
+  # Drop overlay-sourced entries that point at system DLLs without a real third-party Inproc
+  $map.Values |
+    Where-Object {
+      $_.Kind -eq 'IconOverlay' -or (Test-EsfIsActionableShellDll -DllPath $_.Dll)
+    } |
+    Sort-Object Risk, VendorId, Name
 }
 
 function Test-EsfClsidBlocked {
@@ -355,6 +399,66 @@ function Disable-EsfByVendor {
   $record
 }
 
+function Disable-EsfByRiskLevel {
+  <#
+    Disable all catalog vendors at a given risk level (default: high).
+    Writes one combined backup JSON for restore.
+  #>
+  param(
+    [ValidateSet('high', 'medium', 'low')]
+    [string]$Risk = 'high',
+    [switch]$MachineWide,
+    [string]$BackupPath
+  )
+  $catalog = Get-EsfVendorCatalog
+  $targets = @($catalog.vendors | Where-Object { $_.risk -eq $Risk })
+  if ($targets.Count -eq 0) {
+    throw "No vendors with risk='$Risk' in catalog."
+  }
+
+  $allClsids = [System.Collections.Generic.List[string]]::new()
+  $allOverlays = [System.Collections.Generic.List[object]]::new()
+  $vendorIds = [System.Collections.Generic.List[string]]::new()
+  $perVendor = [System.Collections.Generic.List[object]]::new()
+
+  foreach ($v in $targets) {
+    $rec = Disable-EsfByVendor -VendorId $v.id -MachineWide:$MachineWide
+    $vendorIds.Add([string]$v.id)
+    $perVendor.Add([pscustomobject]@{
+        VendorId = $v.id
+        ClsidCount = @($rec.Clsids).Count
+        OverlayCount = @($rec.Overlays).Count
+      })
+    foreach ($id in @($rec.Clsids)) {
+      if ($id -and -not $allClsids.Contains($id)) { $allClsids.Add($id) }
+    }
+    foreach ($ov in @($rec.Overlays)) {
+      $allOverlays.Add($ov)
+    }
+  }
+
+  $combined = [pscustomobject]@{
+    TimeUtc    = (Get-Date).ToUniversalTime().ToString('o')
+    Action     = 'disable-by-risk'
+    Risk       = $Risk
+    VendorId   = $null
+    VendorIds  = @($vendorIds)
+    Vendors    = @($perVendor)
+    Clsids     = @($allClsids)
+    Overlays   = @($allOverlays)
+  }
+
+  if ($BackupPath) {
+    $dir = Split-Path -Parent $BackupPath
+    if ($dir -and -not (Test-Path -LiteralPath $dir)) {
+      New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+    $combined | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $BackupPath -Encoding UTF8
+  }
+
+  $combined
+}
+
 function Restore-EsfFromBackup {
   param([Parameter(Mandatory)][string]$BackupPath)
   if (-not (Test-Path -LiteralPath $BackupPath)) {
@@ -362,23 +466,31 @@ function Restore-EsfFromBackup {
   }
   $record = Get-Content -LiteralPath $BackupPath -Raw -Encoding UTF8 | ConvertFrom-Json
   foreach ($id in @($record.Clsids)) {
-    Enable-EsfClsid -Clsid $id
+    if ($id) { Enable-EsfClsid -Clsid $id }
   }
   $root = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\ShellIconOverlayIdentifiers'
-  if (Test-Path -LiteralPath $root) {
+  if ((Test-Path -LiteralPath $root) -and $record.Overlays) {
     Get-ChildItem -LiteralPath $root | Where-Object { $_.PSChildName -like 'DISABLED_*' } | ForEach-Object {
-      # Only restore overlays that were part of this vendor disable if listed
+      # Only restore overlays listed in this backup (never blanket-enable all DISABLED_*)
       $n = $_.PSChildName
       $match = @($record.Overlays | Where-Object {
-          $orig = $_.Name
-          $n -eq ('DISABLED_' + $orig.Trim()) -or $n -like ('DISABLED_*' + $orig.Trim())
+          $orig = [string]$_.Name
+          if ([string]::IsNullOrWhiteSpace($orig)) { return $false }
+          $n -eq ('DISABLED_' + $orig.Trim()) -or
+          $n -eq ('DISABLED_' + $orig) -or
+          $n.EndsWith($orig.Trim())
         })
-      if ($match.Count -gt 0 -or $record.VendorId) {
+      if ($match.Count -gt 0) {
         try { [void](Enable-EsfIconOverlayKey -DisabledName $n) } catch { }
       }
     }
   }
-  [pscustomobject]@{ RestoredFrom = $BackupPath; VendorId = $record.VendorId }
+  [pscustomobject]@{
+    RestoredFrom = $BackupPath
+    VendorId     = $record.VendorId
+    VendorIds    = $record.VendorIds
+    Risk         = $record.Risk
+  }
 }
 
 function Restart-EsfExplorer {

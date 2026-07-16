@@ -10,9 +10,9 @@ Add-Type -AssemblyName System.Drawing
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'explorer-shell-fix'
-$form.Size = New-Object System.Drawing.Size(920, 640)
+$form.Size = New-Object System.Drawing.Size(980, 660)
 $form.StartPosition = 'CenterScreen'
-$form.MinimumSize = New-Object System.Drawing.Size(760, 520)
+$form.MinimumSize = New-Object System.Drawing.Size(820, 540)
 
 $lblVendor = New-Object System.Windows.Forms.Label
 $lblVendor.Text = 'Vendor / 厂商'
@@ -21,33 +21,39 @@ $lblVendor.AutoSize = $true
 
 $cmbVendor = New-Object System.Windows.Forms.ComboBox
 $cmbVendor.Location = New-Object System.Drawing.Point(100, 10)
-$cmbVendor.Size = New-Object System.Drawing.Size(360, 24)
+$cmbVendor.Size = New-Object System.Drawing.Size(300, 24)
 $cmbVendor.DropDownStyle = 'DropDownList'
 
 $btnDiagnose = New-Object System.Windows.Forms.Button
 $btnDiagnose.Text = 'Diagnose / 诊断'
-$btnDiagnose.Location = New-Object System.Drawing.Point(480, 8)
-$btnDiagnose.Size = New-Object System.Drawing.Size(120, 28)
+$btnDiagnose.Location = New-Object System.Drawing.Point(420, 8)
+$btnDiagnose.Size = New-Object System.Drawing.Size(110, 28)
 
 $btnDisable = New-Object System.Windows.Forms.Button
-$btnDisable.Text = 'Disable + Restart'
-$btnDisable.Location = New-Object System.Drawing.Point(610, 8)
-$btnDisable.Size = New-Object System.Drawing.Size(130, 28)
+$btnDisable.Text = 'Disable vendor'
+$btnDisable.Location = New-Object System.Drawing.Point(540, 8)
+$btnDisable.Size = New-Object System.Drawing.Size(110, 28)
+
+$btnDisableHigh = New-Object System.Windows.Forms.Button
+$btnDisableHigh.Text = 'Disable ALL HIGH'
+$btnDisableHigh.Location = New-Object System.Drawing.Point(660, 8)
+$btnDisableHigh.Size = New-Object System.Drawing.Size(140, 28)
+$btnDisableHigh.BackColor = [System.Drawing.Color]::FromArgb(255, 240, 200)
 
 $btnRestore = New-Object System.Windows.Forms.Button
 $btnRestore.Text = 'Restore last'
-$btnRestore.Location = New-Object System.Drawing.Point(750, 8)
-$btnRestore.Size = New-Object System.Drawing.Size(130, 28)
+$btnRestore.Location = New-Object System.Drawing.Point(810, 8)
+$btnRestore.Size = New-Object System.Drawing.Size(120, 28)
 
 $btnRestart = New-Object System.Windows.Forms.Button
 $btnRestart.Text = 'Restart Explorer only'
-$btnRestart.Location = New-Object System.Drawing.Point(480, 42)
-$btnRestart.Size = New-Object System.Drawing.Size(160, 28)
+$btnRestart.Location = New-Object System.Drawing.Point(420, 42)
+$btnRestart.Size = New-Object System.Drawing.Size(150, 28)
 
 $btnExport = New-Object System.Windows.Forms.Button
 $btnExport.Text = 'Export JSON'
-$btnExport.Location = New-Object System.Drawing.Point(650, 42)
-$btnExport.Size = New-Object System.Drawing.Size(110, 28)
+$btnExport.Location = New-Object System.Drawing.Point(580, 42)
+$btnExport.Size = New-Object System.Drawing.Size(100, 28)
 
 $chkMachine = New-Object System.Windows.Forms.CheckBox
 $chkMachine.Text = 'Also HKLM (admin) / 写入本机策略'
@@ -61,11 +67,11 @@ $txt.ReadOnly = $true
 $txt.Font = New-Object System.Drawing.Font('Consolas', 9)
 $txt.Location = New-Object System.Drawing.Point(12, 80)
 $txt.Anchor = 'Top,Bottom,Left,Right'
-$txt.Size = New-Object System.Drawing.Size(868, 500)
+$txt.Size = New-Object System.Drawing.Size(928, 520)
 $txt.WordWrap = $false
 
 $form.Controls.AddRange(@(
-    $lblVendor, $cmbVendor, $btnDiagnose, $btnDisable, $btnRestore,
+    $lblVendor, $cmbVendor, $btnDiagnose, $btnDisable, $btnDisableHigh, $btnRestore,
     $btnRestart, $btnExport, $chkMachine, $txt
   ))
 
@@ -88,8 +94,14 @@ function Load-Vendors {
 }
 
 function Get-SelectedVendorId {
-  if ($cmbVendor.SelectedItem -eq $null) { return $null }
+  if ($null -eq $cmbVendor.SelectedItem) { return $null }
   ($cmbVendor.SelectedItem.ToString() -split '\s+\|\s+')[0].Trim()
+}
+
+function Ensure-BackupDir {
+  $dir = Join-Path $script:Root '.backups'
+  if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+  $dir
 }
 
 $btnDiagnose.Add_Click({
@@ -116,8 +128,7 @@ $btnDisable.Add_Click({
     if ($r -ne 'Yes') { return }
     try {
       $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
-      $dir = Join-Path $script:Root '.backups'
-      if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+      $dir = Ensure-BackupDir
       $bp = Join-Path $dir ("{0}-{1:yyyyMMdd-HHmmss}.json" -f $vid, (Get-Date))
       $rec = Disable-EsfByVendor -VendorId $vid -MachineWide:$chkMachine.Checked -BackupPath $bp
       $script:LastBackup = $bp
@@ -127,6 +138,32 @@ $btnDisable.Add_Click({
       [System.Windows.Forms.MessageBox]::Show("Done. Backup:`n$bp", 'OK') | Out-Null
     } catch {
       [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Disable failed') | Out-Null
+    } finally {
+      $form.Cursor = [System.Windows.Forms.Cursors]::Default
+    }
+  })
+
+$btnDisableHigh.Add_Click({
+    $r = [System.Windows.Forms.MessageBox]::Show(
+      "Disable ALL catalog vendors with risk=high (Baidu/WPS/360/...) and restart Explorer?`n一键禁用目录中所有 high 风险厂商扩展并重启资源管理器。",
+      'Confirm disable-high',
+      'YesNo',
+      'Warning'
+    )
+    if ($r -ne 'Yes') { return }
+    try {
+      $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+      $dir = Ensure-BackupDir
+      $bp = Join-Path $dir ("risk-high-{0:yyyyMMdd-HHmmss}.json" -f (Get-Date))
+      $rec = Disable-EsfByRiskLevel -Risk high -MachineWide:$chkMachine.Checked -BackupPath $bp
+      $script:LastBackup = $bp
+      Restart-EsfExplorer | Out-Null
+      $d = Get-EsfDiagnosis
+      $vendors = ($rec.VendorIds -join ', ')
+      Write-Ui ("Disabled HIGH: $vendors`r`nBackup: $bp`r`nCLSIDs: $(($rec.Clsids | Measure-Object).Count)`r`n`r`n" + (Format-EsfDiagnosisText -Diagnosis $d))
+      [System.Windows.Forms.MessageBox]::Show("Done.`nVendors: $vendors`nBackup:`n$bp", 'OK') | Out-Null
+    } catch {
+      [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Disable-high failed') | Out-Null
     } finally {
       $form.Cursor = [System.Windows.Forms.Cursors]::Default
     }
